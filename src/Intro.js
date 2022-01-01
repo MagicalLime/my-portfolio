@@ -5,6 +5,7 @@ import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
 import { ShadowMapViewer } from 'three/examples/jsm/utils/ShadowMapViewer.js'
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
+import { Sky } from 'three/examples/jsm/objects/Sky.js'
 
 const SHADOW_MAP_WIDTH = 2048
 const SHADOW_MAP_HEIGHT = 1024
@@ -15,6 +16,7 @@ const FLOOR = - 250
 
 let camera, controls, scene, renderer
 let container
+let sky, sun
 
 const NEAR = 10, FAR = 3000
 
@@ -35,6 +37,9 @@ animate()
 
 function init() {
 
+    let fogColor = '#FDF1CD'
+    let spotlightColor = '#FEFFD6'
+
     container = document.createElement('div')
     document.body.appendChild(container)
 
@@ -47,14 +52,14 @@ function init() {
 
     scene = new THREE.Scene()
     scene.background = new THREE.Color('#47D1FF')
-    scene.fog = new THREE.Fog('#ADE8F4', 1000, FAR)
+    scene.fog = new THREE.Fog(fogColor, 1000, FAR)
 
     // LIGHTS
 
     const ambient = new THREE.AmbientLight(0x444444)
     scene.add(ambient)
 
-    light = new THREE.SpotLight('#FEFFD6', 1, 0, Math.PI / 5, 0.3)
+    light = new THREE.SpotLight(spotlightColor, 1, 0, Math.PI / 4, 0.3)
     light.position.set(0, 1500, 1000)
     light.target.position.set(0, 0, 0)
 
@@ -86,15 +91,50 @@ function init() {
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFShadowMap
 
+    // Sky
+
+    sky = new Sky()
+    sky.scale.setScalar(450000)
+    scene.add(sky)
+
+    sun = new THREE.Vector3()
+
+    const defaultSkyValues = {
+        turbidity: 10,
+        rayleigh: 1,
+        mieCoefficient: 0.005,
+        mieDirectionalG: 0.7,
+        elevation: 1,
+        azimuth: 180,
+        exposure: renderer.toneMappingExposure
+    }
+
+    const uniforms = sky.material.uniforms;
+    uniforms['turbidity'].value = defaultSkyValues.turbidity;
+    uniforms['rayleigh'].value = defaultSkyValues.rayleigh;
+    uniforms['mieCoefficient'].value = defaultSkyValues.mieCoefficient;
+    uniforms['mieDirectionalG'].value = defaultSkyValues.mieDirectionalG;
+
+    const phi = THREE.MathUtils.degToRad(90 - defaultSkyValues.elevation);
+    const theta = THREE.MathUtils.degToRad(defaultSkyValues.azimuth);
+
+    sun.setFromSphericalCoords(1, phi, theta);
+
+    uniforms['sunPosition'].value.copy(sun);
+    
+
+    renderer.toneMappingExposure = defaultSkyValues.exposure;
+    renderer.render(scene, camera);
+
     // Cloud Texture
 
-    const size = 128;
-    const data = new Uint8Array(size * size * size);
+    const size = 128
+    const data = new Uint8Array(size * size * size)
 
-    let i = 0;
-    const scale = 0.05;
-    const perlin = new ImprovedNoise();
-    const vector = new THREE.Vector3();
+    let i = 0
+    const scale = 0.05
+    const perlin = new ImprovedNoise()
+    const vector = new THREE.Vector3()
 
     for (let z = 0; z < size; z++) {
 
@@ -102,9 +142,9 @@ function init() {
 
             for (let x = 0; x < size; x++) {
 
-                const d = 1.0 - vector.set(x, y, z).subScalar(size / 2).divideScalar(size).length();
-                data[i] = (128 + 128 * perlin.noise(x * scale / 1.5, y * scale, z * scale / 1.5)) * d * d;
-                i++;
+                const d = 1.0 - vector.set(x, y, z).subScalar(size / 2).divideScalar(size).length()
+                data[i] = (128 + 128 * perlin.noise(x * scale / 1.5, y * scale, z * scale / 1.5)) * d * d
+                i++
 
             }
 
@@ -112,12 +152,12 @@ function init() {
 
     }
 
-    const texture = new THREE.DataTexture3D(data, size, size, size);
-    texture.format = THREE.RedFormat;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.unpackAlignment = 1;
-    texture.needsUpdate = true;
+    const texture = new THREE.DataTexture3D(data, size, size, size)
+    texture.format = THREE.RedFormat
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.unpackAlignment = 1
+    texture.needsUpdate = true
 
     // Cloud Material
 
@@ -135,7 +175,7 @@ function init() {
 						vDirection = position - vOrigin;
 						gl_Position = projectionMatrix * mvPosition;
 					}
-				`;
+				`
 
     const fragmentShader = /* glsl */`
 					precision highp float;
@@ -214,9 +254,9 @@ function init() {
 						color = ac;
 						if ( color.a == 0.0 ) discard;
 					}
-				`;
+				`
 
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const geometry = new THREE.BoxGeometry(1, 1, 1)
     const material = new THREE.RawShaderMaterial({
         glslVersion: THREE.GLSL3,
         uniforms: {
@@ -233,10 +273,10 @@ function init() {
         fragmentShader,
         side: THREE.BackSide,
         transparent: true
-    });
+    })
 
     const cloudMesh = new THREE.Mesh(geometry, material);
-    scene.add(cloudMesh);
+    scene.add(cloudMesh)
 
     
 
@@ -298,10 +338,13 @@ function createHUD() {
 
 function createScene() {
 
+    let groundColor = '#FDF1CD'
+    let textColor = '#D46F93'
+
     // GROUND
 
     const geometry = new THREE.PlaneGeometry(100, 100)
-    const planeMaterial = new THREE.MeshPhongMaterial({ color: '#C6C7DA' })
+    const planeMaterial = new THREE.MeshPhongMaterial({ color: groundColor })
 
     const ground = new THREE.Mesh(geometry, planeMaterial)
 
@@ -336,7 +379,7 @@ function createScene() {
         textGeo.computeBoundingBox()
         const centerOffset = - 0.5 * (textGeo.boundingBox.max.x - textGeo.boundingBox.min.x)
 
-        const textMaterial = new THREE.MeshPhongMaterial({ color: '#7851A9', specular: 0xffffff })
+        const textMaterial = new THREE.MeshPhongMaterial({ color: textColor, specular: 0xffffff })
 
         const mesh = new THREE.Mesh(textGeo, textMaterial)
         mesh.position.x = centerOffset
