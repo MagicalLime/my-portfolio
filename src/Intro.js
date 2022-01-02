@@ -10,6 +10,8 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader'
 const SHADOW_MAP_WIDTH = 2048
 const SHADOW_MAP_HEIGHT = 1024
 
+let clouds
+
 let SCREEN_WIDTH = window.innerWidth
 let SCREEN_HEIGHT = window.innerHeight
 const FLOOR = - 250
@@ -30,6 +32,10 @@ let lightShadowMapViewer
 const clock = new THREE.Clock()
 
 let showHUD = false
+
+const raycaster = new THREE.Raycaster()
+
+const mouse = new THREE.Vector2()
 
 init()
 animate()
@@ -126,10 +132,11 @@ function init() {
     renderer.toneMappingExposure = defaultSkyValues.exposure;
     renderer.render(scene, camera);
 
-    // LOADING MANAGER
+    // LOADING MANAGER (Currently does not work because the DOM has not been fully loaded before this code is ran)
     const loadingManager = new THREE.LoadingManager(() => {
 
         const loadingScreen = document.getElementById('loading-screen')
+        console.log(loadingScreen)
         loadingScreen.classList.add('fade-out')
 
         loadingScreen.addEventListener('transitionend', onTransitionEnd)
@@ -138,32 +145,44 @@ function init() {
 
     // CLOUDS
 
+
     const loader = new OBJLoader(loadingManager)
 
+    clouds = new THREE.Group()
 
     loader.load("./models/Cloud.obj", (object) => {
         object.position.set(-4000, 100, -6000)
         object.scale.set(2.5, 2.5, 2.5)
-        scene.add(object)
+        clouds.add(object)
     })
         
     loader.load("./models/Cloud.obj", (object) => {
         object.position.set(-1550, -50, -6500)
         object.scale.set(2, 2, 2)
-        scene.add(object)
+        clouds.add(object)
     })
 
     loader.load("./models/Cloud.obj", (object) => {
         object.position.set(1450, -20, -6500)
         object.scale.set(2, 2, 2)
-        scene.add(object)
+        clouds.add(object)
     })
 
     loader.load("./models/Cloud.obj", (object) => {
         object.position.set(-6000, 700, -6000)
         object.scale.set(1.75, 1.75, 1.75)
-        scene.add(object)
+        clouds.add(object)
     })
+
+    scene.add(clouds)
+
+    // RAY PICKING
+
+    
+
+
+
+
 
 
     // CONTROLS
@@ -184,6 +203,11 @@ function init() {
 
     
 
+}
+
+function onMouseMove(event) {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
 }
 
 function onTransitionEnd(event) {
@@ -417,6 +441,15 @@ function render() {
 
     controls.update(delta)
 
+    raycaster.setFromCamera(mouse, camera)
+
+    const intersects = raycaster.intersectObjects(clouds.children)
+
+    for (let i = 0; i < intersects.length; i++) {
+        intersects[i].object.material.color.set('#900600')
+        console.log("changing color")
+    }
+
     renderer.clear()
     renderer.render(scene, camera)
 
@@ -427,5 +460,11 @@ function render() {
         lightShadowMapViewer.render(renderer)
 
     }
+
+    window.addEventListener('mousemove', onMouseMove, false);
+
+    //window.requestAnimationFrame(render);
+
+    
 
 }
