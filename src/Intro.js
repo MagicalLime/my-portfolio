@@ -4,8 +4,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
 import { ShadowMapViewer } from 'three/examples/jsm/utils/ShadowMapViewer.js'
-import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader'
 
 const SHADOW_MAP_WIDTH = 2048
 const SHADOW_MAP_HEIGHT = 1024
@@ -18,7 +18,7 @@ let camera, controls, scene, renderer
 let container
 let sky, sun
 
-const NEAR = 10, FAR = 3000
+const NEAR = 10, FAR = 10000
 
 let mixer
 
@@ -38,7 +38,7 @@ animate()
 function init() {
 
     let fogColor = '#FDF1CD'
-    let spotlightColor = '#FEFFD6'
+    let spotlightColor = '#F2878A'
 
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -101,7 +101,7 @@ function init() {
 
     const defaultSkyValues = {
         turbidity: 10,
-        rayleigh: 1,
+        rayleigh: 3,
         mieCoefficient: 0.005,
         mieDirectionalG: 0.7,
         elevation: 1,
@@ -126,159 +126,44 @@ function init() {
     renderer.toneMappingExposure = defaultSkyValues.exposure;
     renderer.render(scene, camera);
 
-    // Cloud Texture
+    // LOADING MANAGER
+    const loadingManager = new THREE.LoadingManager(() => {
 
-    const size = 128
-    const data = new Uint8Array(size * size * size)
+        const loadingScreen = document.getElementById('loading-screen')
+        loadingScreen.classList.add('fade-out')
 
-    let i = 0
-    const scale = 0.05
-    const perlin = new ImprovedNoise()
-    const vector = new THREE.Vector3()
+        loadingScreen.addEventListener('transitionend', onTransitionEnd)
 
-    for (let z = 0; z < size; z++) {
-
-        for (let y = 0; y < size; y++) {
-
-            for (let x = 0; x < size; x++) {
-
-                const d = 1.0 - vector.set(x, y, z).subScalar(size / 2).divideScalar(size).length()
-                data[i] = (128 + 128 * perlin.noise(x * scale / 1.5, y * scale, z * scale / 1.5)) * d * d
-                i++
-
-            }
-
-        }
-
-    }
-
-    const texture = new THREE.DataTexture3D(data, size, size, size)
-    texture.format = THREE.RedFormat
-    texture.minFilter = THREE.LinearFilter
-    texture.magFilter = THREE.LinearFilter
-    texture.unpackAlignment = 1
-    texture.needsUpdate = true
-
-    // Cloud Material
-
-    const vertexShader = /* glsl */`
-					in vec3 position;
-					uniform mat4 modelMatrix;
-					uniform mat4 modelViewMatrix;
-					uniform mat4 projectionMatrix;
-					uniform vec3 cameraPos;
-					out vec3 vOrigin;
-					out vec3 vDirection;
-					void main() {
-						vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-						vOrigin = vec3( inverse( modelMatrix ) * vec4( cameraPos, 1.0 ) ).xyz;
-						vDirection = position - vOrigin;
-						gl_Position = projectionMatrix * mvPosition;
-					}
-				`
-
-    const fragmentShader = /* glsl */`
-					precision highp float;
-					precision highp sampler3D;
-					uniform mat4 modelViewMatrix;
-					uniform mat4 projectionMatrix;
-					in vec3 vOrigin;
-					in vec3 vDirection;
-					out vec4 color;
-					uniform vec3 base;
-					uniform sampler3D map;
-					uniform float threshold;
-					uniform float range;
-					uniform float opacity;
-					uniform float steps;
-					uniform float frame;
-					uint wang_hash(uint seed)
-					{
-							seed = (seed ^ 61u) ^ (seed >> 16u);
-							seed *= 9u;
-							seed = seed ^ (seed >> 4u);
-							seed *= 0x27d4eb2du;
-							seed = seed ^ (seed >> 15u);
-							return seed;
-					}
-					float randomFloat(inout uint seed)
-					{
-							return float(wang_hash(seed)) / 4294967296.;
-					}
-					vec2 hitBox( vec3 orig, vec3 dir ) {
-						const vec3 box_min = vec3( - 0.5 );
-						const vec3 box_max = vec3( 0.5 );
-						vec3 inv_dir = 1.0 / dir;
-						vec3 tmin_tmp = ( box_min - orig ) * inv_dir;
-						vec3 tmax_tmp = ( box_max - orig ) * inv_dir;
-						vec3 tmin = min( tmin_tmp, tmax_tmp );
-						vec3 tmax = max( tmin_tmp, tmax_tmp );
-						float t0 = max( tmin.x, max( tmin.y, tmin.z ) );
-						float t1 = min( tmax.x, min( tmax.y, tmax.z ) );
-						return vec2( t0, t1 );
-					}
-					float sample1( vec3 p ) {
-						return texture( map, p ).r;
-					}
-					float shading( vec3 coord ) {
-						float step = 0.01;
-						return sample1( coord + vec3( - step ) ) - sample1( coord + vec3( step ) );
-					}
-					void main(){
-						vec3 rayDir = normalize( vDirection );
-						vec2 bounds = hitBox( vOrigin, rayDir );
-						if ( bounds.x > bounds.y ) discard;
-						bounds.x = max( bounds.x, 0.0 );
-						vec3 p = vOrigin + bounds.x * rayDir;
-						vec3 inc = 1.0 / abs( rayDir );
-						float delta = min( inc.x, min( inc.y, inc.z ) );
-						delta /= steps;
-						// Jitter
-						// Nice little seed from
-						// https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/
-						uint seed = uint( gl_FragCoord.x ) * uint( 1973 ) + uint( gl_FragCoord.y ) * uint( 9277 ) + uint( frame ) * uint( 26699 );
-						vec3 size = vec3( textureSize( map, 0 ) );
-						float randNum = randomFloat( seed ) * 2.0 - 1.0;
-						p += rayDir * randNum * ( 1.0 / size );
-						//
-						vec4 ac = vec4( base, 0.0 );
-						for ( float t = bounds.x; t < bounds.y; t += delta ) {
-							float d = sample1( p + 0.5 );
-							d = smoothstep( threshold - range, threshold + range, d ) * opacity;
-							float col = shading( p + 0.5 ) * 3.0 + ( ( p.x + p.y ) * 0.25 ) + 0.2;
-							ac.rgb += ( 1.0 - ac.a ) * d * col;
-							ac.a += ( 1.0 - ac.a ) * d;
-							if ( ac.a >= 0.95 ) break;
-							p += rayDir * delta;
-						}
-						color = ac;
-						if ( color.a == 0.0 ) discard;
-					}
-				`
-
-    const geometry = new THREE.BoxGeometry(1, 1, 1)
-    const material = new THREE.RawShaderMaterial({
-        glslVersion: THREE.GLSL3,
-        uniforms: {
-            base: { value: new THREE.Color(0x798aa0) },
-            map: { value: texture },
-            cameraPos: { value: new THREE.Vector3() },
-            threshold: { value: 0.25 },
-            opacity: { value: 0.25 },
-            range: { value: 0.1 },
-            steps: { value: 100 },
-            frame: { value: 0 }
-        },
-        vertexShader,
-        fragmentShader,
-        side: THREE.BackSide,
-        transparent: true
     })
 
-    const cloudMesh = new THREE.Mesh(geometry, material);
-    scene.add(cloudMesh)
+    // CLOUDS
 
-    
+    const loader = new OBJLoader(loadingManager)
+
+
+    loader.load("./models/Cloud.obj", (object) => {
+        object.position.set(-4000, 100, -6000)
+        object.scale.set(2.5, 2.5, 2.5)
+        scene.add(object)
+    })
+        
+    loader.load("./models/Cloud.obj", (object) => {
+        object.position.set(-1550, -50, -6500)
+        object.scale.set(2, 2, 2)
+        scene.add(object)
+    })
+
+    loader.load("./models/Cloud.obj", (object) => {
+        object.position.set(1450, -20, -6500)
+        object.scale.set(2, 2, 2)
+        scene.add(object)
+    })
+
+    loader.load("./models/Cloud.obj", (object) => {
+        object.position.set(-6000, 700, -6000)
+        object.scale.set(1.75, 1.75, 1.75)
+        scene.add(object)
+    })
 
 
     // CONTROLS
@@ -296,6 +181,14 @@ function init() {
 
     window.addEventListener('resize', onWindowResize)
     window.addEventListener('keydown', onKeyDown)
+
+    
+
+}
+
+function onTransitionEnd(event) {
+
+    event.target.remove();
 
 }
 
@@ -339,7 +232,7 @@ function createHUD() {
 function createScene() {
 
     let groundColor = '#FDF1CD'
-    let textColor = '#D46F93'
+    let textColor = '#E8B671'
 
     // GROUND
 
@@ -433,11 +326,7 @@ function createScene() {
 
         mesh.speed = speed
 
-        mixer.clipAction(clip, mesh).
-            setDuration(duration).
-            // to shift the playback out of phase:
-            startAt(- duration * Math.random()).
-            play()
+        mixer.clipAction(clip, mesh).setDuration(duration).startAt(- duration * Math.random()).play()
 
         mesh.position.set(x, y, z)
         mesh.rotation.y = Math.PI / 2
@@ -474,7 +363,7 @@ function createScene() {
         const mesh = gltf.scene.children[0]
         const clip = gltf.animations[0]
 
-        addMorph(mesh, clip, 500, 1, 500 - Math.random() * 1000, FLOOR + 350, 40)
+        addMorph(mesh, clip, 500, 1, 500 - Math.random() * 500, FLOOR + 350, 40)
 
     })
 
@@ -483,7 +372,7 @@ function createScene() {
         const mesh = gltf.scene.children[0]
         const clip = gltf.animations[0]
 
-        addMorph(mesh, clip, 350, 1, 500 - Math.random() * 1000, FLOOR + 350, 340)
+        addMorph(mesh, clip, 350, 1, 500 - Math.random() * 500, FLOOR + 50 + Math.random() * 350, 340)
 
     })
 
@@ -492,7 +381,7 @@ function createScene() {
         const mesh = gltf.scene.children[0]
         const clip = gltf.animations[0]
 
-        addMorph(mesh, clip, 450, 0.5, 500 - Math.random() * 1000, FLOOR + 300, 700)
+        addMorph(mesh, clip, 450, 0.5, 500 - Math.random() * 500, FLOOR + 50 + Math.random() * 300, 700)
 
     })
 
