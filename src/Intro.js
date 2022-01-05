@@ -6,11 +6,18 @@ import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
 import { ShadowMapViewer } from 'three/examples/jsm/utils/ShadowMapViewer.js'
 import { Sky } from 'three/examples/jsm/objects/Sky.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader'
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 const SHADOW_MAP_WIDTH = 2048
 const SHADOW_MAP_HEIGHT = 1024
 
 let clouds
+
+let selectedObjects = []
 
 let SCREEN_WIDTH = window.innerWidth
 let SCREEN_HEIGHT = window.innerHeight
@@ -30,6 +37,8 @@ let light
 let lightShadowMapViewer
 
 const clock = new THREE.Clock()
+
+let outlinePass, composer, effectFXAA
 
 let showHUD = false
 
@@ -133,15 +142,20 @@ function init() {
     renderer.render(scene, camera);
 
     // LOADING MANAGER (Currently does not work because the DOM has not been fully loaded before this code is ran)
-    const loadingManager = new THREE.LoadingManager(() => {
+    const loadingManager = new THREE.LoadingManager()
 
+    loadingManager.onLoad = () => {
+        
         const loadingScreen = document.getElementById('loading-screen')
         console.log(loadingScreen)
         loadingScreen.classList.add('fade-out')
 
-        loadingScreen.addEventListener('transitionend', onTransitionEnd)
+        //loadingScreen.addEventListener('transitionend', onTransitionEnd) 
+    }
 
-    })
+    loadingManager.onProgress = () => {
+        console.log("loading file")
+    }
 
     // CLOUDS
 
@@ -178,9 +192,20 @@ function init() {
 
     // RAY PICKING
 
+    composer = new EffectComposer(renderer)
+
+    const renderPass = new RenderPass(scene, camera)
+    composer.addPass(renderPass)
+
+    outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera)
     
+    outlinePass.visibleEdgeColor.set("#63A530")
+    outlinePass.edgeStrength = 10
+    composer.addPass(outlinePass)
 
-
+    effectFXAA = new ShaderPass(FXAAShader)
+    effectFXAA.uniforms['resolution'].value.set(1 / window.innerWidth, 1 / window.innerHeight)
+    composer.addPass(effectFXAA)
 
 
 
@@ -189,7 +214,7 @@ function init() {
 
     controls = new FirstPersonControls(camera, renderer.domElement)
 
-    controls.lookSpeed = 0.025
+    controls.lookSpeed = 0.0125
     controls.movementSpeed = 500
     controls.noFly = false
     controls.lookVertical = false
@@ -256,7 +281,7 @@ function createHUD() {
 function createScene() {
 
     let groundColor = '#FDF1CD'
-    let textColor = '#E8B671'
+    let textColor = '#FF90B0'
 
     // GROUND
 
@@ -411,9 +436,20 @@ function createScene() {
 
 }
 
+function addSelectedObject(object) {
+    selectedObjects = []
+    selectedObjects.push(object)
+    console.log("selected")
+}
+
 function animate() {
 
+    
+    
+
     requestAnimationFrame(animate)
+
+    composer.render()
 
     render()
 
@@ -444,14 +480,24 @@ function render() {
     raycaster.setFromCamera(mouse, camera)
 
     const intersects = raycaster.intersectObjects(clouds.children)
+ 
 
-    for (let i = 0; i < intersects.length; i++) {
-        intersects[i].object.material.color.set('#900600')
-        console.log("changing color")
+    if (intersects.length > 0) {
+
+        const selectedObject = intersects[0].object
+        addSelectedObject(selectedObject)
+        outlinePass.selectedObjects = selectedObjects
+        
+        
+
+    } else {
+
+        // outlinePass.selectedObjects = [];
+
     }
 
-    renderer.clear()
-    renderer.render(scene, camera)
+    //renderer.clear()
+    //renderer.render(scene, camera)
 
     // Render debug HUD with shadow map
 
